@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LeGods Black Jack</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .card {
+            width: 60px;
+            height: 85px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
+            margin: 4px;
+            background-color: white; /* Default card color */
+            color: black;
+            border: 1px solid #333;
+        }
+        .card.hidden {
+            background-color: #f43f5e; /* Red-500 from Tailwind for the back */
+            color: white;
+            font-size: 1rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 sm:p-8">
+    <div class="max-w-xl mx-auto bg-gray-800 p-6 rounded-xl shadow-2xl border border-red-700">
+        <header class="text-center mb-6">
+            <h1 class="text-4xl font-extrabold text-white mb-1">LeGods Black Jack</h1>
+            <p class="text-lg text-red-400 font-semibold">Beat the Dealer of Ascension!</p>
+        </header>
+
+        <div class="mb-4 p-3 bg-gray-700 rounded-lg flex justify-between">
+            <span class="font-light text-red-300">Your Aura:</span>
+            <span id="player-aura" class="font-bold text-yellow-300">1000</span>
+        </div>
+
+        <div id="bet-area" class="text-center mb-6">
+            <label for="bet-amount" class="text-red-200 block mb-2">Place Your Aura Bet:</label>
+            <input type="number" id="bet-amount" value="10" min="1" class="w-24 p-2 rounded text-black text-center bg-gray-200">
+            <button id="start-game-btn" class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded transition">
+                Start Game
+            </button>
+        </div>
+
+        <div id="game-area" class="hidden">
+            <div class="mb-6 border border-gray-600 p-3 rounded-lg bg-gray-700">
+                <h3 class="text-xl font-bold mb-2">Dealer's Hand (<span id="dealer-score">?</span>)</h3>
+                <div id="dealer-hand" class="flex flex-wrap justify-center">
+                    </div>
+            </div>
+
+            <div class="mb-6 border border-red-600 p-3 rounded-lg bg-gray-700">
+                <h3 class="text-xl font-bold mb-2">Your Hand (<span id="player-score">0</span>)</h3>
+                <div id="player-hand" class="flex flex-wrap justify-center">
+                    </div>
+            </div>
+
+            <div id="action-buttons" class="flex justify-center space-x-4 mb-4">
+                <button id="hit-btn" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded transition" disabled>
+                    Hit
+                </button>
+                <button id="stand-btn" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-6 rounded transition" disabled>
+                    Stand
+                </button>
+            </div>
+        </div>
+
+        <div id="results-message" class="text-center text-2xl font-extrabold mt-6 py-4 rounded-lg">
+            </div>
+
+        <button id="new-round-btn" class="w-full bg-red-800 hover:bg-red-700 text-white font-bold py-3 rounded transition mt-4 hidden">
+            New Round
+        </button>
+    </div>
+
+    <script>
+        // --- Game Variables ---
+        let playerAura = 1000;
+        let currentBet = 0;
+        let deck = [];
+        let playerHand = [];
+        let dealerHand = [];
+        let gameActive = false;
+
+        // --- DOM Elements ---
+        const playerAuraEl = document.getElementById('player-aura');
+        const betAreaEl = document.getElementById('bet-area');
+        const gameAreaEl = document.getElementById('game-area');
+        const resultsMessageEl = document.getElementById('results-message');
+        const newRoundBtn = document.getElementById('new-round-btn');
+        const hitBtn = document.getElementById('hit-btn');
+        const standBtn = document.getElementById('stand-btn');
+        const startGameBtn = document.getElementById('start-game-btn');
+        const betInput = document.getElementById('bet-amount');
+
+        // --- Core Functions ---
+
+        function updateAuraDisplay() {
+            playerAuraEl.textContent = playerAura.toLocaleString();
+            betInput.max = playerAura; // Prevent betting more than available aura
+        }
+
+        function createDeck() {
+            const suits = ['♥', '♦', '♣', '♠'];
+            const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+            deck = [];
+            for (const suit of suits) {
+                for (const rank of ranks) {
+                    let value = parseInt(rank);
+                    if (rank === 'J' || rank === 'Q' || rank === 'K') value = 10;
+                    if (rank === 'A') value = 11;
+                    deck.push({ rank, suit, value });
+                }
+            }
+            // Simple shuffle:
+            for (let i = deck.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [deck[i], deck[j]] = [deck[j], deck[i]];
+            }
+        }
+
+        function dealCard(hand) {
+            return hand.push(deck.pop());
+        }
+
+        function getScore(hand) {
+            let score = hand.reduce((sum, card) => sum + card.value, 0);
+            let aceCount = hand.filter(card => card.rank === 'A').length;
+
+            // Handle Aces: subtract 10 for each Ace while score is > 21
+            while (score > 21 && aceCount > 0) {
+                score -= 10;
+                aceCount--;
+            }
+            return score;
+        }
+
+        function renderHands(hideDealerFirst) {
+            const render = (hand, elementId, hideFirst = false) => {
+                const handEl = document.getElementById(elementId);
+                handEl.innerHTML = '';
+                let displayScore = 0;
+
+                hand.forEach((card, index) => {
+                    const isHidden = hideFirst && index === 0;
+                    const cardEl = document.createElement('div');
+                    cardEl.className = 'card ' + (isHidden ? 'hidden' : 'bg-white');
+                    cardEl.textContent = isHidden ? '?' : card.rank + card.suit;
+                    handEl.appendChild(cardEl);
+                });
+                
+                if (hideFirst) {
+                    // Score with one card hidden
+                    let visibleHand = hand.slice(1);
+                    displayScore = getScore(visibleHand);
+                    document.getElementById('dealer-score').textContent = displayScore === 0 ? '?' : (displayScore + '+');
+                } else {
+                    document.getElementById('dealer-score').textContent = getScore(hand);
+                }
+            };
+            
+            render(playerHand, 'player-hand');
+            document.getElementById('player-score').textContent = getScore(playerHand);
+            render(dealerHand, 'dealer-hand', hideDealerFirst);
+        }
+
+        // --- Game Flow ---
+
+        function startGame() {
+            if (playerAura < parseInt(betInput.value)) {
+                resultsMessageEl.className = 'text-center text-xl font-bold mt-6 py-4 rounded-lg bg-red-900';
+                resultsMessageEl.textContent = "You don't have enough Aura to place that bet!";
+                return;
+            }
+
+            currentBet = parseInt(betInput.value);
+            playerAura -= currentBet;
+            gameActive = true;
+            createDeck();
+            playerHand = [];
+            dealerHand = [];
+            resultsMessageEl.textContent = '';
+            
+            // Deal initial hands
+            dealCard(playerHand);
+            dealCard(dealerHand);
+            dealCard(playerHand);
+            dealCard(dealerHand); // Second dealer card is hidden
+
+            renderHands(true); // Render with dealer's first card hidden
+            updateAuraDisplay();
+
+            betAreaEl.classList.add('hidden');
+            gameAreaEl.classList.remove('hidden');
+            hitBtn.disabled = false;
+            standBtn.disabled = false;
+
+            checkBlackJack();
+        }
+
+        function checkBlackJack() {
+            if (getScore(playerHand) === 21) {
+                // Natural Black Jack
+                stand();
+            }
+        }
+
+        function hit() {
+            if (!gameActive) return;
+            dealCard(playerHand);
+            renderHands(true);
+            
+            if (getScore(playerHand) > 21) {
+                endGame('Bust! Dealer wins.', 'bg-red-900');
+            }
+        }
+
+        function stand() {
+            if (!gameActive) return;
+            hitBtn.disabled = true;
+            standBtn.disabled = true;
+
+            // Reveal dealer's hidden card
+            renderHands(false);
+
+            // Dealer logic: must hit on 16 or less
+            let dealerScore = getScore(dealerHand);
+            while (dealerScore < 17) {
+                dealCard(dealerHand);
+                dealerScore = getScore(dealerHand);
+                renderHands(false);
+            }
+
+            // Determine winner
+            if (dealerScore > 21) {
+                endGame('Dealer Busts! You win ' + currentBet * 2 + ' Aura!', 'bg-green-900', currentBet * 2);
+            } else if (getScore(playerHand) > dealerScore) {
+                endGame('You win ' + currentBet * 2 + ' Aura!', 'bg-green-900', currentBet * 2);
+            } else if (getScore(playerHand) < dealerScore) {
+                endGame('Dealer wins!', 'bg-red-900', 0);
+            } else {
+                endGame('Push! Bet returned.', 'bg-yellow-900', currentBet); // Push: return bet
+            }
+        }
+
+        function endGame(message, colorClass, payout = 0) {
+            gameActive = false;
+            playerAura += payout;
+            updateAuraDisplay();
+
+            // Final rendering to show dealer's full hand and score
+            renderHands(false); 
+            
+            resultsMessageEl.className = 'text-center text-2xl font-extrabold mt-6 py-4 rounded-lg ' + colorClass;
+            resultsMessageEl.textContent = message;
+
+            hitBtn.disabled = true;
+            standBtn.disabled = true;
+            newRoundBtn.classList.remove('hidden');
+        }
+
+        function newRound() {
+            gameAreaEl.classList.add('hidden');
+            betAreaEl.classList.remove('hidden');
+            newRoundBtn.classList.add('hidden');
+            resultsMessageEl.textContent = '';
+            document.getElementById('dealer-hand').innerHTML = '';
+            document.getElementById('player-hand').innerHTML = '';
+            document.getElementById('dealer-score').textContent = '?';
+            document.getElementById('player-score').textContent = '0';
+        }
+
+        // --- Event Listeners and Initialization ---
+
+        startGameBtn.addEventListener('click', startGame);
+        hitBtn.addEventListener('click', hit);
+        standBtn.addEventListener('click', stand);
+        newRoundBtn.addEventListener('click', newRound);
+
+        // Initial setup
+        updateAuraDisplay();
+    </script>
+</body>
+</html>
